@@ -13,6 +13,7 @@ func main() {
 	fmt.Println("Welcome to Battleship field designer!")
 	fmt.Println("Please, populate a battlefield with battle-ships.")
 	fmt.Println("Note, a size of the field is random, it can change every time you run this program.")
+	fmt.Println("Note, each vessel will be placed at a random location, vertically, horizontally or even diagonally.")
 	printCommands()
 	field := initializeField(getFieldSize())
 	printField(field)
@@ -53,7 +54,7 @@ func runTheLoop(field [][]string) {
 }
 
 /**
- * Clears the terminal.
+ * Clears the terminal, which creates an effect of shapes been added within a "static screen".
  */
 func clearTerminal() {
 	clear := map[string]func() {
@@ -75,7 +76,8 @@ func clearTerminal() {
 		return
 	}
 
-	fmt.Println("Cannot clear your terminal screen.")
+	fmt.Println("Function which clears your terminal screen is not compatible with your OS.")
+	fmt.Println("Only Windows and Linux are supported.")
 }
 
 /**
@@ -100,7 +102,7 @@ func exitTheProgram() {
 }
 
 /**
- * Initializes two-dimensional slice, which will function as actual field.
+ * Initializes two-dimensional slice, which will function as an actual battlefield.
  */
 func initializeField(size int) [][]string {
 	field := make([][]string, size)
@@ -146,22 +148,144 @@ func placeCarrier(field [][]string) {
 
 /**
  * Places a vessel of given type on the board at a random location.
- * If chosen location does not fit the ship, then the function will retry to choose a location up to 100 times.
+ * If chosen location does not fit the ship, then the function will retry to choose a location up to 200 times.
  * In case suitable location is not found - appropriate message will be printed, and the program will terminate.
  */
 func placeShip(field [][]string, shipType uint8) {
-	for i := 0; i < 100; i++ { // This is the "retry loop".
+	for i := 0; i < 200; i++ { // This is the "retry loop".
 		if placeShipAtVertex(field, getShipVertex(field), shipType) {
 			return
 		}
 	}
 
 	fmt.Print("Cannot generate valid position for your vessel.")
-	os.Exit(0)
+	exitTheProgram()
+}
+
+/**
+ * Places requested vessel at the specified location.
+ */
+func placeShipAtVertex(field [][]string, vertex map[string]int, shipType uint8) bool {
+	shipLength := getShipLength(shipType)
+	shipCoordinates := make([]map[string]int, 0)
+	var shipDirection uint8
+	var lastLocationAdjacentCoordinates DirectionToCoordinate
+
+	for i := 0; i < shipLength; i++ {
+		if i == 0 {
+			// Check randomly chosen coordinate.
+			// In case it is free - allocate it.
+			// During the next iteration (if applicable) only surroundings of this coordinate will be checked for allocation.
+			if ok, adjacentCoordinates := adjacentCoordinatesFree(field, vertex["x"], vertex["y"], Directions.None); ok {
+				shipCoordinates = append(shipCoordinates, vertex)
+				lastLocationAdjacentCoordinates = adjacentCoordinates
+				continue
+			} else {
+				return false
+			}
+		}
+
+		if i == 1 {
+			// Check surroundings of previously allocated coordinate to determine a "direction" of a new vessel.
+			// Allocate a new coordinate, if possible.
+			for direction, lastLocationAdjacentCoordinate := range lastLocationAdjacentCoordinates {
+				x, y := lastLocationAdjacentCoordinate["x"], lastLocationAdjacentCoordinate["y"]
+
+				if ok, adjacentCoordinates := adjacentCoordinatesFree(field, x, y, getDirectionToSkip(direction)); ok {
+					shipCoordinates = append(shipCoordinates, lastLocationAdjacentCoordinate)
+					lastLocationAdjacentCoordinates = adjacentCoordinates
+					shipDirection = direction
+					break
+				}
+			}
+
+			if len(shipCoordinates) == 1 {
+				// The second coordinate for the vessel is not found.
+				// The function must return false to let the caller (func placeShip()) to retry.
+				return false
+			}
+
+			continue
+		}
+
+		// Try to allocate remaining coordinates to complete "vessel's shaping".
+		// For now the task is simpler than during first and second iterations,
+		// since the "direction" of the ship is determined, hence there is only one coordinate to be checked.
+		nextShipCoordinate := lastLocationAdjacentCoordinates[shipDirection]
+		x, y := nextShipCoordinate["x"], nextShipCoordinate["y"]
+
+		if ok, adjacentCoordinates := adjacentCoordinatesFree(field, x, y, getDirectionToSkip(shipDirection)); ok {
+			shipCoordinates = append(shipCoordinates, nextShipCoordinate)
+			lastLocationAdjacentCoordinates = adjacentCoordinates
+		}
+	}
+
+	// Finally check if the vessel is shaped properly (vessel reached required length).
+	if len(shipCoordinates) != shipLength {
+		return false
+	} else {
+		for _, coordinate := range shipCoordinates {
+			field[coordinate["x"]][coordinate["y"]] = "*"
+		}
+
+		return true
+	}
+}
+
+/**
+ * Accepts ship's direction, and returns the opposite one.
+ * It is used to check ship's adjacent coordinates, excluding those already allocated by given ship.
+ */
+func getDirectionToSkip(shipDirection uint8) uint8 {
+	var directionToSkip uint8
+
+	switch shipDirection {
+	case Directions.North:
+		directionToSkip = Directions.South
+	case Directions.South:
+		directionToSkip = Directions.North
+	case Directions.East:
+		directionToSkip = Directions.West
+	case Directions.West:
+		directionToSkip = Directions.East
+	case Directions.NorthWest:
+		directionToSkip = Directions.SouthEast
+	case Directions.NorthEast:
+		directionToSkip = Directions.SouthWest
+	case Directions.SouthWest:
+		directionToSkip = Directions.NorthEast
+	case Directions.SouthEast:
+		directionToSkip = Directions.NorthWest
+	case Directions.None:
+		directionToSkip = Directions.None
+	}
+
+	return directionToSkip
+}
+
+/**
+ * Returns ship's length in accordance to its type.
+ */
+func getShipLength(shipType uint8) int {
+	var shipLength int
+
+	switch shipType {
+	case ShipTypes.Submarine:
+		shipLength = 1
+	case ShipTypes.Destroyer:
+		shipLength = 2
+	case ShipTypes.Cruiser:
+		shipLength = 3
+	case ShipTypes.Carrier:
+		shipLength = 4
+	}
+
+	return shipLength
 }
 
 /**
  * Checks if adjacent coordinates are free.
+ * If given coordinate (x, y) is approved, then returns a list of adjacent coordinates.
  */
 func adjacentCoordinatesFree(field [][]string, x int, y int, directionToSkip uint8) (bool, DirectionToCoordinate) {
 	fieldLength := len(field)
@@ -188,65 +312,65 @@ func adjacentCoordinatesFree(field [][]string, x int, y int, directionToSkip uin
 		}
 	}
 
-	return true, getAdjacentCoordinates(x, y, directionToSkip)
+	return true, getAdjacentCoordinates(x, y, directionToSkip, fieldLength)
 }
 
 /**
- * TODO: add description.
+ * Returns a list of coordinates, adjacent to current one (x, y).
  */
-func getAdjacentCoordinates(x int, y int, directionToSkip uint8) DirectionToCoordinate {
+func getAdjacentCoordinates(x int, y int, directionToSkip uint8, fieldLength int) DirectionToCoordinate {
 	directionToCoordinate := make(DirectionToCoordinate)
 
-	if directionToSkip != Directions.West {
+	if directionToSkip != Directions.West && x > 0 {
 		directionToCoordinate[Directions.West] = map[string]int {
 			"x": x - 1,
 			"y": y,
 		}
 	}
 
-	if directionToSkip != Directions.East {
+	if directionToSkip != Directions.East && x + 1 < fieldLength {
 		directionToCoordinate[Directions.East] = map[string]int {
 			"x": x + 1,
 			"y": y,
 		}
 	}
 
-	if directionToSkip != Directions.North {
+	if directionToSkip != Directions.North && y + 1 < fieldLength {
 		directionToCoordinate[Directions.North] = map[string]int {
 			"x": x,
 			"y": y + 1,
 		}
 	}
 
-	if directionToSkip != Directions.South {
+	if directionToSkip != Directions.South && y > 0 {
 		directionToCoordinate[Directions.South] = map[string]int {
 			"x": x,
 			"y": y - 1,
 		}
 	}
 
-	if directionToSkip != Directions.NorthWest {
+	if directionToSkip != Directions.NorthWest && x > 0 && y + 1 < fieldLength {
 		directionToCoordinate[Directions.NorthWest] = map[string]int {
 			"x": x - 1,
 			"y": y + 1,
 		}
 	}
 
-	if directionToSkip != Directions.SouthWest {
+	if directionToSkip != Directions.SouthWest && x > 0 && y > 0 {
 		directionToCoordinate[Directions.SouthWest] = map[string]int {
 			"x": x - 1,
 			"y": y - 1,
 		}
 	}
 
-	if directionToSkip != Directions.NorthEast {
+	if directionToSkip != Directions.NorthEast && x + 1 < fieldLength && y + 1 < fieldLength {
 		directionToCoordinate[Directions.NorthEast] = map[string]int {
 			"x": x + 1,
 			"y": y + 1,
 		}
 	}
 
-	if directionToSkip != Directions.SouthEast {
+	if directionToSkip != Directions.SouthEast && x + 1 < fieldLength && y > 0 {
 		directionToCoordinate[Directions.SouthEast] = map[string]int {
 			"x": x + 1,
 			"y": y - 1,
@@ -254,61 +378,6 @@ func getAdjacentCoordinates(x int, y int, directionToSkip uint8) DirectionToCoor
 	}
 
 	return directionToCoordinate
-}
-
-/**
- * TODO: complete the body, and add the description.
- */
-func placeShipAtVertex(field [][]string, vertex map[string]int, shipType uint8) bool {
-	var shipLength int
-
-	switch shipType {
-	case ShipTypes.Submarine:
-		shipLength = 1
-	case ShipTypes.Destroyer:
-		shipLength = 2
-	case ShipTypes.Cruiser:
-		shipLength = 3
-	case ShipTypes.Carrier:
-		shipLength = 4
-	}
-
-	shipCoordinates := make([]map[string]int, 0)
-	// var shipDirection uint8
-	var lastLocationAdjacentCoordinates DirectionToCoordinate
-
-	for i := 0; i < shipLength; i++ {
-		if i == 0 {
-			if ok, adjacentCoordinates := adjacentCoordinatesFree(field, vertex["x"], vertex["y"], Directions.None); ok {
-				shipCoordinates = append(shipCoordinates, vertex)
-				lastLocationAdjacentCoordinates = adjacentCoordinates
-				continue
-			} else {
-				break
-			}
-		}
-
-		for direction, lastLocationAdjacentCoordinate := range lastLocationAdjacentCoordinates {
-			x, y := lastLocationAdjacentCoordinate["x"], lastLocationAdjacentCoordinate["y"]
-
-			if ok, adjacentCoordinates := adjacentCoordinatesFree(field, x, y, direction); ok {
-				shipCoordinates = append(shipCoordinates, lastLocationAdjacentCoordinate)
-				lastLocationAdjacentCoordinates = adjacentCoordinates
-				// shipDirection = direction
-				break
-			}
-		}
-	}
-
-	if len(shipCoordinates) != shipLength {
-		return false
-	} else {
-		for _, coordinate := range shipCoordinates {
-			field[coordinate["x"]][coordinate["y"]] = "*"
-		}
-
-		return true
-	}
 }
 
 /**
@@ -329,7 +398,7 @@ func getShipVertex(field [][]string) map[string]int {
  */
 func getFieldSize() int {
 	rand.Seed(time.Now().UnixNano())
-	const least = 15
+	const least = 10
 	return rand.Intn(least) + least
 }
 
@@ -354,7 +423,7 @@ func printField(field [][]string) {
 }
 
 /**
- * Prints a horizontal bar.
+ * Prints a horizontal bar within the battlefield.
  */
 func printHorizontalBar(fieldLength int) {
 	for i := 0; i < fieldLength; i++ {
@@ -405,7 +474,7 @@ func initializeDirectionsEnum() *DirectionsRegistry {
 type DirectionToCoordinate map[uint8]map[string]int
 
 /**
- * ShipLengthsRegistry struct, that mimics an enum.
+ * ShipTypeRegistry struct, that mimics an enum.
  */
 type ShipTypeRegistry struct {
 	Submarine uint8
@@ -415,7 +484,7 @@ type ShipTypeRegistry struct {
 }
 
 /**
- * Initializes ShipType struct, that mimics an enum.
+ * Initializes ShipTypeRegistry struct, that mimics an enum.
  */
 func initializeShipTypeEnum() *ShipTypeRegistry {
 	return &ShipTypeRegistry{
@@ -426,5 +495,7 @@ func initializeShipTypeEnum() *ShipTypeRegistry {
 	}
 }
 
+// Enables Directions and ShipTypes to be used as regular enums.
+// E.g.: Directions.West, ShipTypes.Submarine.
 var Directions = initializeDirectionsEnum()
 var ShipTypes = initializeShipTypeEnum()
